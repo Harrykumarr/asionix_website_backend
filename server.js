@@ -1,22 +1,13 @@
-// Career form mailer — nodemailer SMTP (fully server-side, no EmailJS)
+// Career form mailer — Resend HTTP API (works on all cloud platforms)
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors    = require('cors');
 const multer  = require('multer');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-// SMTP transporter (configured via .env)
-const transporter = nodemailer.createTransport({
-	host:   process.env.SMTP_HOST || 'smtp.gmail.com',
-	port:   parseInt(process.env.SMTP_PORT || '587', 10),
-	secure: process.env.SMTP_SECURE === 'true',  // true for 465, false for 587
-	auth: {
-		user: process.env.SMTP_USER,
-		pass: process.env.SMTP_PASS,
-	},
-	family: 4,  // Force IPv4 to avoid IPv6 connectivity issues
-});
+// Initialize Resend with API key
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const app = express();
 
@@ -83,9 +74,9 @@ app.post('/api/career', upload.single('resume'), async (req, res) => {
 	console.log(`[Mailer] Sending application from '${name}' → ${to}`);
 
 	try {
-		await transporter.sendMail({
-			from:    `"Asionix Careers" <${process.env.SMTP_USER}>`,
-			to,
+		const { data, error } = await resend.emails.send({
+			from: process.env.FROM_EMAIL || 'Asionix Careers <onboarding@resend.dev>',
+			to: [to],
 			subject: `New Job Application: ${job_title} — ${name}`,
 			html: `
 				<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">
@@ -104,17 +95,21 @@ app.post('/api/career', upload.single('resume'), async (req, res) => {
 							<tr><td style="padding:8px 0;color:#666">Current CTC</td><td style="font-weight:600">${current_ctc}</td></tr>
 							<tr><td style="padding:8px 0;color:#666">Expected CTC</td><td style="font-weight:600">${expected_ctc}</td></tr>
 						</table>
-						<p style="margin:24px 0 0;color:#666;font-size:13px">Resume is attached to this email.</p>
+						<p style="margin:24px 0 0;color:#666;font-size:13px">Resume filename: ${req.file.originalname}</p>
 					</div>
 				</div>`,
 			attachments: [{
-				filename:    req.file.originalname,
-				content:     req.file.buffer,
-				contentType: req.file.mimetype,
+				filename: req.file.originalname,
+				content: req.file.buffer.toString('base64'),
 			}],
 		});
 
-		console.log('[Mailer] Email sent successfully');
+		if (error) {
+			console.error('[Mailer] Failed to send:', error.message);
+			return res.status(500).json({ error: `Failed to send email: ${error.message}` });
+		}
+
+		console.log('[Mailer] Email sent successfully, id:', data.id);
 		return res.json({ success: true, message: 'Application submitted successfully.' });
 	} catch (err) {
 		console.error('[Mailer] Failed to send:', err.message);
@@ -142,10 +137,10 @@ app.post('/api/contact', async (req, res) => {
 	console.log(`[Contact] Inquiry from '${fullName}' <${email}>`);
 
 	try {
-		await transporter.sendMail({
-			from:    `"Asionix Website" <${process.env.SMTP_USER}>`,
-			to,
-			replyTo: email,
+		const { data, error } = await resend.emails.send({
+			from: process.env.FROM_EMAIL || 'Asionix Website <onboarding@resend.dev>',
+			to: [to],
+			reply_to: email,
 			subject: `New Inquiry from ${fullName}`,
 			html: `
 				<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden">
@@ -168,7 +163,12 @@ app.post('/api/contact', async (req, res) => {
 				</div>`,
 		});
 
-		console.log('[Contact] Email sent successfully');
+		if (error) {
+			console.error('[Contact] Failed to send:', error.message);
+			return res.status(500).json({ error: `Failed to send email: ${error.message}` });
+		}
+
+		console.log('[Contact] Email sent successfully, id:', data.id);
 		return res.json({ success: true, message: 'Message sent successfully.' });
 	} catch (err) {
 		console.error('[Contact] Failed to send:', err.message);
